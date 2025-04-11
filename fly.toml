@@ -1,0 +1,84 @@
+# fly.toml app configuration file generated for firewatch-shy-snow-6284 on 2025-03-30T13:06:02+11:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'firewatch-shy-snow-6284'
+primary_region = 'syd'
+
+[build]
+  [build.args]
+    GO_VERSION = '1.24.1'
+
+[env]
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+# For the smoke test service
+[[services]]
+  internal_port = 5000
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5000
+
+# For the prime time service
+[[services]]
+  internal_port = 5001
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5001
+
+# For means to an end 
+[[services]]
+  internal_port = 5002
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5002
+
+# For budget chat
+[[services]]
+  internal_port = 5003
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5003
+
+# For the unusual database
+[[services]]
+  internal_port = 5004
+  protocol = "udp"
+
+  [[services.ports]]
+  port = 5004
+
+# For mob in the middle
+[[services]]
+  internal_port = 5005
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5005
+
+# For mob in the middle
+[[services]]
+  internal_port = 5006
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5006
+
