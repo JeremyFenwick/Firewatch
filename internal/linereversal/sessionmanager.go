@@ -86,6 +86,11 @@ func (sm *SessionManager) MonitorSessions() {
 	}
 }
 
+func (sm *SessionManager) SessionExists(id int) bool {
+	_, ok := sm.sessions[id]
+	return ok
+}
+
 // Create a session. Does nothing if it already exists
 func (sm *SessionManager) CreateSession(conn net.PacketConn, address net.Addr, id int) {
 	if session, ok := sm.sessions[id]; ok {

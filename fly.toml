@@ -82,3 +82,11 @@ primary_region = 'syd'
   [[services.ports]]
   port = 5006
 
+# For line reversal
+[[services]]
+  internal_port = 5007
+  protocol = "udp"
+
+  [[services.ports]]
+  port = 5007
+

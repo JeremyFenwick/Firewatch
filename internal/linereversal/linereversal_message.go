@@ -18,6 +18,10 @@ type LRMessage struct {
 	Length   int
 }
 
+func (m *LRMessage) String() string {
+	return fmt.Sprintf("Type: %s, Session: %d, Position: %d, Length: %d, Data: %s", m.Type, m.Session, m.Position, m.Length, string(m.Data))
+}
+
 func (m *LRMessage) Validate() bool {
 	if m.Session < 0 || m.Session > maxInteger {
 		return false

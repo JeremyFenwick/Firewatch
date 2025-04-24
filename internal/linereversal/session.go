@@ -140,9 +140,9 @@ func (s *Session) HandleAck(length int) {
 		s.Logger.Printf("Received ack for pending data: %d", length)
 		s.RetransmitTicker.Stop()
 		// Remove the acknowledged data from the outgoing buffer
-		s.OutgoingBuffer = s.OutgoingBuffer[s.PendingData.Length:]
+		s.OutgoingBuffer = s.OutgoingBuffer[length-s.WritePosition:]
 		// Set the write position to the new position
-		s.WritePosition += s.PendingData.Length
+		s.WritePosition += length - s.WritePosition
 		// Wipe the pending data
 		s.PendingData = nil
 		// We may have more data to send, so we need to check the outgoing buffer

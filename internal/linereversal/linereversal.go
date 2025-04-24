@@ -48,18 +48,49 @@ func Listen(port int) {
 }
 
 func handleRequest(request *udpMessage, udpConn net.PacketConn, sessionManager *SessionManager) {
+	log.Printf("Recieved message: %s", request.message.String())
 	switch request.message.Type {
 	case "connect":
 		sessionManager.CreateSession(udpConn, request.sender, request.message.Session)
 		sessionManager.SendMessage(request.message.Session, ConnectMessage(request.sender))
 	case "data":
-		sessionManager.SendMessage(request.message.Session, DataMessage(request.message.Position, request.message.Data, request.sender))
+		if !sessionManager.SessionExists(request.message.Session) {
+			sendCloseResponse(request.message.Session, udpConn, request.sender)
+		} else {
+			sessionManager.SendMessage(request.message.Session, DataMessage(request.message.Position, request.message.Data, request.sender))
+		}
 	case "ack":
-		sessionManager.SendMessage(request.message.Session, AckMessage(request.message.Length, request.sender))
+		if !sessionManager.SessionExists(request.message.Session) {
+			sendCloseResponse(request.message.Session, udpConn, request.sender)
+		} else {
+			sessionManager.SendMessage(request.message.Session, AckMessage(request.message.Length, request.sender))
+		}
 	case "close":
-		sessionManager.SendMessage(request.message.Session, CloseMessage(request.sender))
+		if !sessionManager.SessionExists(request.message.Session) {
+			sendCloseResponse(request.message.Session, udpConn, request.sender)
+		} else {
+			sessionManager.SendMessage(request.message.Session, CloseMessage(request.sender))
+		}
 	default:
 		log.Printf("Unknown message type: %s", request.message.Type)
+	}
+}
+
+func sendCloseResponse(sessionId int, udpConn net.PacketConn, sender net.Addr) {
+	message := &LRMessage{
+		Type:    "close",
+		Session: sessionId,
+	}
+	buffer := make([]byte, 999)
+	encodedBytes, err := message.Encode(buffer)
+	if err != nil {
+		log.Printf("Error encoding message: %s", err)
+		return
+	}
+	// Send the message to the sender
+	_, err = udpConn.WriteTo(buffer[:encodedBytes], sender)
+	if err != nil {
+		log.Printf("Error sending message: %s", err)
 	}
 }
 
