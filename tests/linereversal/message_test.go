@@ -92,3 +92,21 @@ func TestDecodeMessage(t *testing.T) {
 	assert.Equal(t, "connect", decodedMessage.Type)
 	assert.Equal(t, 12345, decodedMessage.Session)
 }
+
+func TestSlashMessage(t *testing.T) {
+	message := "/data/123/0/foo\\/\\/bar\\/\\/baz/"
+	buffer := []byte(message)
+	decodedMessage, err := linereversal.DecodeLRMessage(buffer)
+	assert.NoError(t, err)
+	assert.Equal(t, "data", decodedMessage.Type)
+	assert.Equal(t, 123, decodedMessage.Session)
+	assert.Equal(t, 0, decodedMessage.Position)
+	assert.Equal(t, []byte("foo//bar//baz"), decodedMessage.Data)
+}
+
+func TestUnescapeData(t *testing.T) {
+	data := []byte("a\\/b")
+	unescaped, err := linereversal.UnescapeData(data)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("a/b"), unescaped)
+}

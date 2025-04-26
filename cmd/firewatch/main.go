@@ -1,6 +1,10 @@
 package main
 
 import (
+	"log"
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/JeremyFenwick/firewatch/internal/budgetchat"
 	"github.com/JeremyFenwick/firewatch/internal/linereversal"
 	"github.com/JeremyFenwick/firewatch/internal/meanstoanend"
@@ -12,6 +16,9 @@ import (
 )
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe(":8080", nil)) // used for the pprof profiler
+	}()
 	go smoketest.Listen(5000)
 	go primetime.Listen(5001)
 	go meanstoanend.Listen(5002)

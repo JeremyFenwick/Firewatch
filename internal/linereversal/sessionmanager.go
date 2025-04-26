@@ -72,6 +72,14 @@ func NewSessionManager() *SessionManager {
 	return sm
 }
 
+func (sm *SessionManager) SessionExists(id int) bool {
+	session, ok := sm.sessions[id]
+	if ok {
+		return !session.IsClosed
+	}
+	return ok
+}
+
 // Sessions close themselves, so we monitor them every 3 minutes
 func (sm *SessionManager) MonitorSessions() {
 	for {
@@ -84,11 +92,6 @@ func (sm *SessionManager) MonitorSessions() {
 		}
 		time.Sleep(MonitorInterval)
 	}
-}
-
-func (sm *SessionManager) SessionExists(id int) bool {
-	_, ok := sm.sessions[id]
-	return ok
 }
 
 // Create a session. Does nothing if it already exists
@@ -104,8 +107,8 @@ func (sm *SessionManager) CreateSession(conn net.PacketConn, address net.Addr, i
 			return
 		}
 	}
-	messageChannel := make(chan SessionMessage)
-	dataChannel := make(chan []byte)
+	messageChannel := make(chan SessionMessage, 10)
+	dataChannel := make(chan []byte, 10)
 	sm.sessions[id] = NewSession(conn, address, id, messageChannel, dataChannel)
 	sm.processors[id] = NewLineProcessor(id, messageChannel, dataChannel)
 }

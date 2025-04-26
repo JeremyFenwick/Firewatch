@@ -7,7 +7,6 @@ import (
 )
 
 const maxInteger = 2147483647 // 2**31 - 1
-const maxIntegerLength = 10   // The max number of digits in the max integer as a string
 const maxMessageSize = 999
 
 type LRMessage struct {
@@ -19,7 +18,12 @@ type LRMessage struct {
 }
 
 func (m *LRMessage) String() string {
-	return fmt.Sprintf("Type: %s, Session: %d, Position: %d, Length: %d, Data: %s", m.Type, m.Session, m.Position, m.Length, string(m.Data))
+	if m.Type == "data" {
+		containsNewline := strings.Contains(string(m.Data), "\n")
+		return fmt.Sprintf("Data message. Session: %d, Position: %d, Contains Newline: %t ", m.Session, m.Position, containsNewline)
+	} else {
+		return fmt.Sprintf("Message type: %s, Session: %d, Position: %d, Length: %d", m.Type, m.Session, m.Position, m.Length)
+	}
 }
 
 func (m *LRMessage) Validate() bool {
@@ -73,6 +77,10 @@ func (m *LRMessage) Encode(buffer []byte) (int, error) {
 }
 
 func DecodeLRMessage(buffer []byte) (*LRMessage, error) {
+	// If the buffer is empty, return an error
+	if len(buffer) == 0 {
+		return nil, fmt.Errorf("empty message")
+	}
 	// Check we start and end with a slash
 	if buffer[0] != '/' || buffer[len(buffer)-1] != '/' {
 		return nil, fmt.Errorf("invalid message format: %s", buffer)
@@ -80,7 +88,8 @@ func DecodeLRMessage(buffer []byte) (*LRMessage, error) {
 	// Extract the message
 	fields := []string{}
 	var sb strings.Builder
-	for i, char := range buffer {
+	for i := 0; i < len(buffer); i++ {
+		char := buffer[i]
 		// If we encounter an unescaped slash, we should split the string
 		if char == '/' && (i == 0 || buffer[i-1] != '\\') {
 			if sb.Len() == 0 {
@@ -93,7 +102,7 @@ func DecodeLRMessage(buffer []byte) (*LRMessage, error) {
 		// If we encounter an escaped slash, we should just add it to the string
 		if char == '\\' && i < len(buffer)-1 && (buffer[i+1] == '/' || buffer[i+1] == '\\') {
 			sb.WriteByte(buffer[i+1])
-			i++
+			i += 1
 			continue
 		}
 		// Otherwise, we just add the character to the string
@@ -146,32 +155,40 @@ func constructLRMessage(fields []string) (*LRMessage, error) {
 	return message, nil
 }
 
-// Packs a byte array into a data message. Returns the amount of bytes written
-// As there is a limit of 1000 bytes per message
+// Packs a byte array into a data message. Returns the amount of *unescaped* bytes written.
 func PackDataMessage(message *LRMessage, data []byte, startPosition int) int {
-	// The max int length for position, 5 slashes and the length of the session id
-	// /data/SESSION/POS/DATA/
-	maxDataSize := maxMessageSize - (maxIntegerLength + 5 + len(strconv.Itoa(message.Session)))
-	escapedData := make([]byte, 0, len(data))
-	dataLength := 0
-	escapeCharacters := 0
-	// We need to escape the data if it contains slashes
+	sessionStr := strconv.Itoa(message.Session)
+	positionStr := strconv.Itoa(startPosition)
+
+	// Calculate precise overhead: /data/ (6) + / (1) + / (1) + / (1) + len(sessionStr) + len(positionStr)
+	overhead := 9 + len(sessionStr) + len(positionStr)
+	maxDataSize := maxMessageSize - overhead  // Max length of the *escaped* data field
+	escapedData := make([]byte, 0, len(data)) // Initial capacity guess
+	currentEscapedLen := 0
+	dataLength := 0 // Unescaped bytes consumed
+
 	for _, b := range data {
-		if dataLength+escapeCharacters >= maxDataSize {
-			break
-		}
+		bytesToAdd := 1
+		needsEscape := false
 		if b == '/' || b == '\\' {
-			// If we don't have any more room to pack two bytes, we need to break
-			if dataLength+escapeCharacters+2 >= maxDataSize {
-				break
-			}
-			// If we have room, we need to escape the character
+			bytesToAdd = 2
+			needsEscape = true
+		}
+
+		// Check if adding the next byte (escaped or not) exceeds the limit
+		if currentEscapedLen+bytesToAdd >= maxDataSize {
+			break // Cannot add this byte, stop processing
+		}
+
+		// Add the byte(s)
+		if needsEscape {
 			escapedData = append(escapedData, '\\')
-			escapeCharacters += 1
 		}
 		escapedData = append(escapedData, b)
-		dataLength += 1
+		currentEscapedLen += bytesToAdd
+		dataLength += 1 // Increment count of original bytes processed
 	}
+
 	message.Data = escapedData
 	message.Position = startPosition
 	return dataLength

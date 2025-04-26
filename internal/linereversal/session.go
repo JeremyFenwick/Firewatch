@@ -113,11 +113,14 @@ func (s *Session) RecieveMessage() {
 
 func (s *Session) Close() {
 	s.SendCloseMessage()
-	close(s.ReadChannel)
+	if s.ReadChannel != nil {
+		close(s.ReadChannel)
+	}
 	s.IsClosed = true
 }
 
 func (s *Session) HandleAck(length int) {
+	s.Logger.Printf("Recieved ack message: %d", length)
 	// If this is smaller than our last ack, we ignore it as it is a delayed message
 	if length < s.LastAck {
 		s.Logger.Printf("Received delayed ack message: u%d < %d", length, s.LastAck)
@@ -145,6 +148,8 @@ func (s *Session) HandleAck(length int) {
 		s.WritePosition += length - s.WritePosition
 		// Wipe the pending data
 		s.PendingData = nil
+		// Update the last ack
+		s.LastAck = length
 		// We may have more data to send, so we need to check the outgoing buffer
 		s.HandleOutgoingBuffer()
 	}
@@ -208,7 +213,7 @@ func (s *Session) HandleRecieveData(data []byte, position int) {
 	// Send an ack in response
 	s.SendAckMessage(s.RecievedPosition)
 	// Transmit the data to the read channel
-	s.Logger.Printf("Recieved data: %s", string(unescaped))
+	s.Logger.Printf("Recieved data of length %d \n", len(unescaped))
 	s.ReadChannel <- unescaped
 }
 
@@ -237,7 +242,7 @@ func (s *Session) SendDataMessage(message *LRMessage) {
 		s.Logger.Println("Error encoding data message:", err)
 		return
 	}
-	s.Logger.Printf("Sending data message: %s", string(buffer[:messageLength]))
+	s.Logger.Printf("Sending data message: %s. Expecting ack back of: %d \n", string(buffer[:messageLength]), s.MaxAck)
 	_, err = s.Conn.WriteTo(buffer[:messageLength], s.Address)
 	if err != nil {
 		s.Logger.Println("Error sending data message:", err)
@@ -266,7 +271,7 @@ func (s *Session) SendAckMessage(length int) {
 
 func UnescapeData(data []byte) ([]byte, error) {
 	output := make([]byte, 0, len(data))
-	for i := range data {
+	for i := 0; i < len(data); i++ {
 		// We end with an escaping slash which is invalid
 		if i == len(data)-1 && data[i] == '\\' {
 			return nil, fmt.Errorf("invalid data: %s", data)

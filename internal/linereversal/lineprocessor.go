@@ -1,12 +1,11 @@
 package linereversal
 
-import "log"
-
 type LineProcessor struct {
 	SessionID      int
 	Buffer         []byte
 	DataChannel    chan []byte
 	SessionChannel chan SessionMessage
+	Pointer        int
 }
 
 func NewLineProcessor(sessionID int, sessionChannel chan SessionMessage, dataChannel chan []byte) *LineProcessor {
@@ -14,6 +13,7 @@ func NewLineProcessor(sessionID int, sessionChannel chan SessionMessage, dataCha
 		Buffer:         make([]byte, 0, 1024),
 		DataChannel:    dataChannel,
 		SessionChannel: sessionChannel,
+		Pointer:        0,
 	}
 	// Begin the session listening
 	go lineProcessor.ReadSessionData()
@@ -36,27 +36,33 @@ func (lp *LineProcessor) ReadSessionData() {
 }
 
 func (lp *LineProcessor) ProcessData() {
-	log.Printf("Processing data %s", string(lp.Buffer))
 	for {
 		if len(lp.Buffer) == 0 {
 			return
 		}
 
 		newLineIndex := -1
-		for i, b := range lp.Buffer {
+		index := lp.Pointer
+		for index < len(lp.Buffer) {
+			b := lp.Buffer[index]
 			if b == '\n' {
-				newLineIndex = i
+				newLineIndex = index
 				break
 			}
+			index += 1
 		}
 
 		if newLineIndex == -1 {
+			// Set the pointer to the end of the buffer
+			lp.Pointer = index
 			return
 		}
 		// We have a new line, so we need to process the data
 		lp.ReverseAndSend(lp.Buffer[:newLineIndex])
 		// Remove the processed data from the buffer
 		lp.Buffer = lp.Buffer[newLineIndex+1:]
+		// Reset the pointer
+		lp.Pointer = 0
 	}
 }
 
