@@ -48,6 +48,7 @@ func Listen(port int) {
 }
 
 func incomingBuffer(incoming chan *udpMessage, udpConn net.PacketConn, sessionManager *SessionManager) {
+	outputBuffer := make([]byte, 0, 999)
 	for {
 		// Read the incomingMessage from the channel
 		incomingMessage, ok := <-incoming
@@ -60,11 +61,11 @@ func incomingBuffer(incoming chan *udpMessage, udpConn net.PacketConn, sessionMa
 			log.Printf("Could not decode message: %s", err)
 			continue
 		}
-		handleRequest(decodedMessage, incomingMessage.sender, udpConn, sessionManager)
+		handleRequest(decodedMessage, incomingMessage.sender, udpConn, sessionManager, outputBuffer)
 	}
 }
 
-func handleRequest(message *LRMessage, sender net.Addr, udpConn net.PacketConn, sessionManager *SessionManager) {
+func handleRequest(message *LRMessage, sender net.Addr, udpConn net.PacketConn, sessionManager *SessionManager, outputBuffer []byte) {
 	log.Printf("Recieved message: %s", message.String())
 	switch message.Type {
 	case "connect":
@@ -72,19 +73,19 @@ func handleRequest(message *LRMessage, sender net.Addr, udpConn net.PacketConn, 
 		sessionManager.SendMessage(message.Session, ConnectMessage(sender))
 	case "data":
 		if !sessionManager.SessionExists(message.Session) {
-			sendCloseResponse(message.Session, udpConn, sender)
+			sendCloseResponse(message.Session, udpConn, sender, outputBuffer)
 		} else {
 			sessionManager.SendMessage(message.Session, DataMessage(message.Position, message.Data, sender))
 		}
 	case "ack":
 		if !sessionManager.SessionExists(message.Session) {
-			sendCloseResponse(message.Session, udpConn, sender)
+			sendCloseResponse(message.Session, udpConn, sender, outputBuffer)
 		} else {
 			sessionManager.SendMessage(message.Session, AckMessage(message.Length, sender))
 		}
 	case "close":
 		if !sessionManager.SessionExists(message.Session) {
-			sendCloseResponse(message.Session, udpConn, sender)
+			sendCloseResponse(message.Session, udpConn, sender, outputBuffer)
 		} else {
 			sessionManager.SendMessage(message.Session, CloseMessage(sender))
 		}
@@ -93,19 +94,20 @@ func handleRequest(message *LRMessage, sender net.Addr, udpConn net.PacketConn, 
 	}
 }
 
-func sendCloseResponse(sessionId int, udpConn net.PacketConn, sender net.Addr) {
+func sendCloseResponse(sessionId int, udpConn net.PacketConn, sender net.Addr, outputBuffer []byte) {
 	message := &LRMessage{
 		Type:    "close",
 		Session: sessionId,
 	}
-	buffer := make([]byte, 999)
-	encodedBytes, err := message.Encode(buffer)
+	// Reset the output buffer
+	outputBuffer = outputBuffer[:0]
+	encodedBytes, err := message.Encode(outputBuffer)
 	if err != nil {
 		log.Printf("Error encoding message: %s", err)
 		return
 	}
 	// Send the message to the sender
-	_, err = udpConn.WriteTo(buffer[:encodedBytes], sender)
+	_, err = udpConn.WriteTo(outputBuffer[:encodedBytes], sender)
 	if err != nil {
 		log.Printf("Error sending message: %s", err)
 	}

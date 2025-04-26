@@ -11,8 +11,7 @@ import (
 const MonitorInterval = 3 * time.Minute
 
 type SessionManager struct {
-	sessions   map[int]*Session
-	processors map[int]*LineProcessor
+	sessions map[int]*Session
 }
 
 // Instructions for the sessions behavior
@@ -65,8 +64,7 @@ func ConnectMessage(address net.Addr) SessionMessage {
 // Create a new session manager
 func NewSessionManager() *SessionManager {
 	sm := &SessionManager{
-		sessions:   make(map[int]*Session),
-		processors: make(map[int]*LineProcessor),
+		sessions: make(map[int]*Session),
 	}
 	go sm.MonitorSessions()
 	return sm
@@ -87,7 +85,6 @@ func (sm *SessionManager) MonitorSessions() {
 			if session.IsClosed {
 				close(session.Channel)
 				delete(sm.sessions, session.ID)
-				delete(sm.processors, session.ID)
 			}
 		}
 		time.Sleep(MonitorInterval)
@@ -101,16 +98,13 @@ func (sm *SessionManager) CreateSession(conn net.PacketConn, address net.Addr, i
 		if session.IsClosed {
 			// Session is closed, so we can create a new one. Delete the existing first
 			delete(sm.sessions, id)
-			delete(sm.processors, id)
 		} else {
 			// Session is still open, so we do nothing
 			return
 		}
 	}
-	messageChannel := make(chan SessionMessage, 10)
-	dataChannel := make(chan []byte, 10)
-	sm.sessions[id] = NewSession(conn, address, id, messageChannel, dataChannel)
-	sm.processors[id] = NewLineProcessor(id, messageChannel, dataChannel)
+	messageChannel := make(chan SessionMessage, 20)
+	sm.sessions[id] = NewSession(conn, address, id, messageChannel)
 }
 
 // Send a session a message

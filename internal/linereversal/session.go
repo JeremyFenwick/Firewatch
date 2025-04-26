@@ -1,14 +1,16 @@
 package linereversal
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
 	"time"
 )
 
-const Retransmission = 3 * time.Second
+const Retransmission = 100 * time.Millisecond
 const SessionAcknowledgementTimeout = 60 * time.Second
+const BufferCapacity = 64 * 1024 // 64KB
 
 // We use an actor model for the session
 type Session struct {
@@ -23,15 +25,18 @@ type Session struct {
 	MaxAck           int
 	RecievedPosition int
 
-	// Used for sending data
-	// Note there is a 1000 byte limit on the UDP message size
+	// Used for handling outgoing data
 	RetransmitTicker *time.Timer
 	PendingData      *PendingData
 	OutgoingBuffer   []byte
 	WritePosition    int
 
-	// Used for reading data
-	ReadChannel chan []byte // Used to send data to the consumer
+	// Used for storing recieved data
+	DataStore []byte
+
+	// Buffer used for sending messages
+	// Note there is a 1000 byte limit on the UDP message size
+	SendBuffer []byte
 }
 
 // Used to track outgoing data in transit
@@ -41,15 +46,17 @@ type PendingData struct {
 	Payload *LRMessage
 }
 
-func NewSession(conn net.PacketConn, address net.Addr, id int, messageChannel chan SessionMessage, readChannel chan []byte) *Session {
+func NewSession(conn net.PacketConn, address net.Addr, id int, messageChannel chan SessionMessage) *Session {
 	session := &Session{
-		Conn:        conn,
-		Address:     address,
-		ID:          id,
-		IsClosed:    false,
-		Channel:     messageChannel,
-		Logger:      log.New(log.Writer(), fmt.Sprintf("Session %d: ", id), log.LstdFlags),
-		ReadChannel: readChannel,
+		Conn:           conn,
+		Address:        address,
+		ID:             id,
+		IsClosed:       false,
+		Channel:        messageChannel,
+		Logger:         log.New(log.Writer(), fmt.Sprintf("Session %d: ", id), log.LstdFlags),
+		DataStore:      make([]byte, 0, BufferCapacity),
+		OutgoingBuffer: make([]byte, 0, BufferCapacity),
+		SendBuffer:     make([]byte, 0, 1000),
 	}
 
 	// Start the recieve loop
@@ -103,9 +110,6 @@ func (s *Session) RecieveMessage() {
 			// If we recieve an ack we need to handle it
 			case "recieved_ack":
 				s.HandleAck(msg.Number)
-			// Instruction to write data
-			case "write_data":
-				s.HandleWriteData(msg.Data)
 			}
 		}
 	}
@@ -113,9 +117,6 @@ func (s *Session) RecieveMessage() {
 
 func (s *Session) Close() {
 	s.SendCloseMessage()
-	if s.ReadChannel != nil {
-		close(s.ReadChannel)
-	}
 	s.IsClosed = true
 }
 
@@ -155,31 +156,19 @@ func (s *Session) HandleAck(length int) {
 	}
 }
 
-func (s *Session) HandleWriteData(data []byte) {
-	s.OutgoingBuffer = append(s.OutgoingBuffer, data...)
-	// If we have no pending data in transit, we can initiate the transmission
-	if s.PendingData == nil {
-		s.Logger.Println("Sending data to client")
-		s.HandleOutgoingBuffer()
-	}
-}
-
 func (s *Session) HandleOutgoingBuffer() {
-	// If the buffer is empty, we can return
-	if len(s.OutgoingBuffer) == 0 {
+	// If the buffer is empty, or we already have an outgoing message we can return
+	if len(s.OutgoingBuffer) == 0 || s.PendingData != nil {
 		return
 	}
-	if s.PendingData != nil {
-		// This is not a valid state of out program
-		s.Logger.Println("Handing buffer whilst data is still pending. This is illegal. Closing this client down")
-		s.Close()
-		return
-	}
+	// Create a new buffer for the message
+	buffer := make([]byte, 0, 1000)
 	// If we have pending data, we need to need to pack it and send it
 	newDataMessage := &LRMessage{
 		Type:     "data",
 		Session:  s.ID,
 		Position: s.WritePosition,
+		Data:     buffer,
 	}
 	bytesUsed := PackDataMessage(newDataMessage, s.OutgoingBuffer, s.WritePosition)
 	// The max ack is the write position + the bytes used. Anything we recieve beyond this number we recieve from the client is invalid
@@ -214,7 +203,37 @@ func (s *Session) HandleRecieveData(data []byte, position int) {
 	s.SendAckMessage(s.RecievedPosition)
 	// Transmit the data to the read channel
 	s.Logger.Printf("Recieved data of length %d \n", len(unescaped))
-	s.ReadChannel <- unescaped
+	s.DataStore = append(s.DataStore, unescaped...)
+	// We need to check to see if we recieved a newline
+	s.CheckDataStore()
+}
+
+func (s *Session) CheckDataStore() {
+	for {
+		// If the data store is empty, we can return
+		if len(s.DataStore) == 0 {
+			break
+		}
+		// Search for the next new line
+		newLineIndex := bytes.IndexByte(s.DataStore, '\n')
+		// No new line found, so we can break
+		if newLineIndex == -1 {
+			break
+		}
+		// We have a new line, so we need to reverse the data up to the new line
+		reversed := make([]byte, newLineIndex+1)
+		for i, b := range s.DataStore[0:newLineIndex] {
+			reversed[newLineIndex-1-i] = b
+		}
+		// Add the new line character
+		reversed[newLineIndex] = '\n'
+		// Now load the data into the output buffer
+		s.OutgoingBuffer = append(s.OutgoingBuffer, reversed...)
+		// Remove the processed data from the buffer
+		s.DataStore = s.DataStore[newLineIndex+1:]
+	}
+	// Now we need to handle the outgoing buffer
+	s.HandleOutgoingBuffer()
 }
 
 func (s *Session) SendCloseMessage() {
@@ -222,13 +241,14 @@ func (s *Session) SendCloseMessage() {
 		Type:    "close",
 		Session: s.ID,
 	}
-	buffer := make([]byte, 1000)
-	messageLength, err := closeMessage.Encode(buffer)
+	// Reset the send buffer
+	s.SendBuffer = s.SendBuffer[:0]
+	messageLength, err := closeMessage.Encode(s.SendBuffer)
 	if err != nil {
 		s.Logger.Println("Error encoding close message:", err)
 		return
 	}
-	_, err = s.Conn.WriteTo(buffer[:messageLength], s.Address)
+	_, err = s.Conn.WriteTo(s.SendBuffer[:messageLength], s.Address)
 	if err != nil {
 		s.Logger.Println("Error sending close message:", err)
 		return
@@ -236,14 +256,15 @@ func (s *Session) SendCloseMessage() {
 }
 
 func (s *Session) SendDataMessage(message *LRMessage) {
-	buffer := make([]byte, 1000)
-	messageLength, err := message.Encode(buffer)
+	// Reset the send buffer
+	s.SendBuffer = s.SendBuffer[:0]
+	messageLength, err := message.Encode(s.SendBuffer)
 	if err != nil {
 		s.Logger.Println("Error encoding data message:", err)
 		return
 	}
-	s.Logger.Printf("Sending data message: %s. Expecting ack back of: %d \n", string(buffer[:messageLength]), s.MaxAck)
-	_, err = s.Conn.WriteTo(buffer[:messageLength], s.Address)
+	s.Logger.Printf("Sending data message of length: %d. Expecting ack back of: %d \n", len(message.Data), s.MaxAck)
+	_, err = s.Conn.WriteTo(s.SendBuffer[:messageLength], s.Address)
 	if err != nil {
 		s.Logger.Println("Error sending data message:", err)
 		return
@@ -256,13 +277,14 @@ func (s *Session) SendAckMessage(length int) {
 		Session: s.ID,
 		Length:  length,
 	}
-	buffer := make([]byte, 1000)
-	messageLength, err := ackMessage.Encode(buffer)
+	// Reset the send buffer
+	s.SendBuffer = s.SendBuffer[:0]
+	messageLength, err := ackMessage.Encode(s.SendBuffer)
 	if err != nil {
 		s.Logger.Println("Error encoding ack message:", err)
 		return
 	}
-	_, err = s.Conn.WriteTo(buffer[:messageLength], s.Address)
+	_, err = s.Conn.WriteTo(s.SendBuffer[:messageLength], s.Address)
 	if err != nil {
 		s.Logger.Println("Error sending ack message:", err)
 		return

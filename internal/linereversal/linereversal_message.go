@@ -72,8 +72,8 @@ func (m *LRMessage) Encode(buffer []byte) (int, error) {
 	default:
 		return 0, fmt.Errorf("invalid message type: %s", m.Type)
 	}
-	copied := copy(buffer, data)
-	return copied, nil
+	copied := append(buffer, data...)
+	return len(copied), nil
 }
 
 func DecodeLRMessage(buffer []byte) (*LRMessage, error) {
@@ -162,8 +162,7 @@ func PackDataMessage(message *LRMessage, data []byte, startPosition int) int {
 
 	// Calculate precise overhead: /data/ (6) + / (1) + / (1) + / (1) + len(sessionStr) + len(positionStr)
 	overhead := 9 + len(sessionStr) + len(positionStr)
-	maxDataSize := maxMessageSize - overhead  // Max length of the *escaped* data field
-	escapedData := make([]byte, 0, len(data)) // Initial capacity guess
+	maxDataSize := maxMessageSize - overhead // Max length of the *escaped* data field
 	currentEscapedLen := 0
 	dataLength := 0 // Unescaped bytes consumed
 
@@ -176,20 +175,19 @@ func PackDataMessage(message *LRMessage, data []byte, startPosition int) int {
 		}
 
 		// Check if adding the next byte (escaped or not) exceeds the limit
-		if currentEscapedLen+bytesToAdd >= maxDataSize {
+		if currentEscapedLen+bytesToAdd > maxDataSize {
 			break // Cannot add this byte, stop processing
 		}
 
 		// Add the byte(s)
 		if needsEscape {
-			escapedData = append(escapedData, '\\')
+			message.Data = append(message.Data, '\\')
 		}
-		escapedData = append(escapedData, b)
+		message.Data = append(message.Data, b)
 		currentEscapedLen += bytesToAdd
 		dataLength += 1 // Increment count of original bytes processed
 	}
 
-	message.Data = escapedData
 	message.Position = startPosition
 	return dataLength
 }
