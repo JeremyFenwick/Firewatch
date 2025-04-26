@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const Retransmission = 200 * time.Millisecond // Performance tuning variable. This is too aggressive for a real network
+const Retransmission = 200 * time.Millisecond // Performance tuning variable
 const SessionTimeout = 60 * time.Second
 const BufferCapacity = 64 * 1024 // 64KB
 

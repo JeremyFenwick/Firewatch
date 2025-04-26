@@ -2,6 +2,7 @@ package linereversal
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
@@ -83,6 +84,7 @@ func (sm *SessionManager) MonitorSessions() {
 	for {
 		for _, session := range sm.sessions {
 			if session.IsClosed {
+				log.Printf("Session %d is closed. Closing the channel and removing expired data", session.ID)
 				close(session.Channel)
 				delete(sm.sessions, session.ID)
 			}
