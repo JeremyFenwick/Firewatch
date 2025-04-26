@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-const Retransmission = 100 * time.Millisecond
-const SessionAcknowledgementTimeout = 60 * time.Second
+const Retransmission = 200 * time.Millisecond // Performance tuning variable. This is too aggressive for a real network
+const SessionTimeout = 60 * time.Second
 const BufferCapacity = 64 * 1024 // 64KB
 
 // We use an actor model for the session
@@ -26,10 +26,10 @@ type Session struct {
 	RecievedPosition int
 
 	// Used for handling outgoing data
-	RetransmitTicker *time.Timer
-	PendingData      *PendingData
-	OutgoingBuffer   []byte
-	WritePosition    int
+	Timer          *time.Timer
+	PendingData    *PendingData
+	OutgoingBuffer []byte
+	WritePosition  int
 
 	// Used for storing recieved data
 	DataStore []byte
@@ -37,6 +37,9 @@ type Session struct {
 	// Buffer used for sending messages
 	// Note there is a 1000 byte limit on the UDP message size
 	SendBuffer []byte
+
+	// Timer for session expiration
+	LastMessage time.Time
 }
 
 // Used to track outgoing data in transit
@@ -57,6 +60,7 @@ func NewSession(conn net.PacketConn, address net.Addr, id int, messageChannel ch
 		DataStore:      make([]byte, 0, BufferCapacity),
 		OutgoingBuffer: make([]byte, 0, BufferCapacity),
 		SendBuffer:     make([]byte, 0, 1000),
+		Timer:          time.NewTimer(Retransmission),
 	}
 
 	// Start the recieve loop
@@ -66,29 +70,33 @@ func NewSession(conn net.PacketConn, address net.Addr, id int, messageChannel ch
 
 func (s *Session) RecieveMessage() {
 	for {
-		// The transmitter may not be there
-		var retransmit <-chan time.Time
-		if s.RetransmitTicker != nil {
-			retransmit = s.RetransmitTicker.C
-		}
 		select {
-		case <-retransmit:
+		// The timer covers both data retransmission and session timeout
+		case <-s.Timer.C:
+			// Session has timed out
+			if time.Now().After(s.LastMessage.Add(SessionTimeout)) {
+				s.Logger.Println("Session timed out, closing session.")
+				s.Close()
+				return
+			}
+			// No pending data
 			if s.PendingData == nil {
 				continue
 			}
 			// If the data is expired, we need to close the session
-			if time.Since(s.PendingData.SentAt) > SessionAcknowledgementTimeout {
-				s.Logger.Printf("did not recieve acknowledgement from client after %s, closing session.", SessionAcknowledgementTimeout)
+			if time.Since(s.PendingData.SentAt) > SessionTimeout {
+				s.Logger.Printf("did not recieve acknowledgement from client after %s, closing session.", SessionTimeout)
 				s.Close()
 				return
-			} else {
-				// If the data is not expired, we need to retransmit it
-				s.Logger.Println("Retransmitting data to client")
-				s.SendDataMessage(s.PendingData.Payload)
-				s.RetransmitTicker.Reset(Retransmission)
 			}
+			// If the data is not expired, we need to retransmit it
+			s.Logger.Println("Retransmitting data to client")
+			s.SendDataMessage(s.PendingData.Payload)
+			s.Timer.Reset(Retransmission)
+
 		// Else if we receive a message from the channel
 		case msg, ok := <-s.Channel:
+			s.LastMessage = time.Now()
 			if !ok {
 				s.Logger.Println("Channel closed, exiting receive loop.")
 				return
@@ -142,7 +150,7 @@ func (s *Session) HandleAck(length int) {
 	expectedLength := s.WritePosition + s.PendingData.Length
 	if length <= expectedLength {
 		s.Logger.Printf("Received ack for pending data: %d", length)
-		s.RetransmitTicker.Stop()
+		s.Timer.Stop()
 		// Remove the acknowledged data from the outgoing buffer
 		s.OutgoingBuffer = s.OutgoingBuffer[length-s.WritePosition:]
 		// Set the write position to the new position
@@ -171,7 +179,7 @@ func (s *Session) HandleOutgoingBuffer() {
 		Data:     buffer,
 	}
 	bytesUsed := PackDataMessage(newDataMessage, s.OutgoingBuffer, s.WritePosition)
-	// The max ack is the write position + the bytes used. Anything we recieve beyond this number we recieve from the client is invalid
+	// The max ack is the write position + the bytes used. Anything we recieve beyond this number from the client is invalid
 	s.MaxAck = s.WritePosition + bytesUsed
 	// Set the pending data
 	s.PendingData = &PendingData{
@@ -182,7 +190,7 @@ func (s *Session) HandleOutgoingBuffer() {
 	// Send the data
 	s.SendDataMessage(newDataMessage)
 	// Now set the timer to recieve the ack from the client
-	s.RetransmitTicker = time.NewTimer(Retransmission)
+	s.Timer = time.NewTimer(Retransmission)
 }
 
 func (s *Session) HandleRecieveData(data []byte, position int) {
