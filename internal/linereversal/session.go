@@ -38,7 +38,7 @@ type Session struct {
 	// Note there is a 1000 byte limit on the UDP message size
 	SendBuffer []byte
 
-	// Timer for session expiration
+	// Time for session expiration
 	LastMessage time.Time
 }
 

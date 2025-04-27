@@ -48,13 +48,6 @@ func DataMessage(position int, data []byte, address net.Addr) SessionMessage {
 	}
 }
 
-func WriteMessage(data []byte) SessionMessage {
-	return SessionMessage{
-		Type: "write_data",
-		Data: data,
-	}
-}
-
 func ConnectMessage(address net.Addr) SessionMessage {
 	return SessionMessage{
 		Type:    "connect_client",
