@@ -6,6 +6,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/JeremyFenwick/firewatch/internal/budgetchat"
+	"github.com/JeremyFenwick/firewatch/internal/insecuresocketslayer"
 	"github.com/JeremyFenwick/firewatch/internal/linereversal"
 	"github.com/JeremyFenwick/firewatch/internal/meanstoanend"
 	"github.com/JeremyFenwick/firewatch/internal/mobinthemiddle"
@@ -27,5 +28,6 @@ func main() {
 	go mobinthemiddle.Listen(5005, "chat.protohackers.com", 16963)
 	go speeddaemon.Listen(5006)
 	go linereversal.Listen(5007)
+	go insecuresocketslayer.Listen(5008)
 	select {}
 }

@@ -12,35 +12,35 @@ type Cipher struct {
 // USER INTERFACE
 
 // Returns the cipher, the number of bytes used, and an error if any
-func NewCipher(data []byte) (*Cipher, int, error) {
+func NewCipher(data []byte) (*Cipher, error) {
 	// Generate the cipher
-	cipher, bytesUsed, err := getCipher(data)
+	cipher, _, err := getCipher(data)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	// Check cipher validity
 	cipher.Valid = cipher.validCipher()
-	return cipher, bytesUsed, nil
+	return cipher, nil
 }
 
-func (c *Cipher) EncodeData(data []byte) []byte {
+func (c *Cipher) EncodeData(startPos int, data []byte) []byte {
 	encoded := make([]byte, len(data))
 	for i, element := range data {
 		for _, inst := range c.Operations {
-			element = inst.encode(i, element)
+			element = inst.encode(startPos+i, element)
 		}
 		encoded[i] = element
 	}
 	return encoded
 }
 
-func (c *Cipher) DecodeData(data []byte) []byte {
+func (c *Cipher) DecodeData(startPos int, data []byte) []byte {
 	decoded := make([]byte, len(data))
 	for i, element := range data {
 		// Walk through the operations in reverse order
 		for j := len(c.Operations) - 1; j >= 0; j-- {
 			inst := c.Operations[j]
-			element = inst.decode(i, element)
+			element = inst.decode(startPos+i, element)
 		}
 		decoded[i] = element
 	}
@@ -50,7 +50,7 @@ func (c *Cipher) DecodeData(data []byte) []byte {
 // Validate the cipher. It cannot reproduce the same data after encoding
 func (c *Cipher) validCipher() bool {
 	testData := []byte(DummyMessage)
-	encoded := c.EncodeData(testData)
+	encoded := c.EncodeData(0, testData)
 	for i, element := range encoded {
 		if element != testData[i] {
 			return true

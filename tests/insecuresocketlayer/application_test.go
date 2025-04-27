@@ -16,11 +16,9 @@ func TestToyCount(t *testing.T) {
 }
 
 func TestMostCommonToy(t *testing.T) {
-	toys := []byte("5x Toy1, 3x Toy2, 2x Toy3\n")
+	toys := "5x Toy1, 3x Toy2, 2x Toy3\n"
 	expectedToy := "5x Toy1"
-	expectedBytesUsed := 26
-	actualToy, actualBytesUsed, err := insecuresocketslayer.MostCommonToy(toys)
+	toy, err := insecuresocketslayer.MostCommonToy(toys)
 	assert.NoError(t, err)
-	assert.Equal(t, expectedToy, actualToy)
-	assert.Equal(t, expectedBytesUsed, actualBytesUsed)
+	assert.Equal(t, expectedToy, toy)
 }
