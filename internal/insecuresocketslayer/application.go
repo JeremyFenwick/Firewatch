@@ -1,42 +1,81 @@
 package insecuresocketslayer
 
 import (
-	"fmt"
-	"strconv"
-	"strings"
+	"bytes"
+	"errors"
 )
 
-// Returns the most common toy and the data up to the newline read
-func MostCommonToy(toys string) (string, error) {
-	// Split the toys by comma
-	toyList := strings.Split(toys, ",")
-	toyMax := 0
-	maxToy := ""
-	// Find the toy with the highest count
-	for _, toy := range toyList {
-		toy = strings.TrimSpace(toy)
-		toyCount, err := GetToyCount(toy)
-		if err != nil {
-			return "", fmt.Errorf("invalid toy description: %s", toy)
+func MostCommonToy(line []byte) ([]byte, error) {
+	// Handle empty input
+	if len(bytes.TrimSpace(line)) == 0 {
+		return nil, errors.New("empty request line")
+	}
+
+	var maxCount int
+	var bestToy []byte
+	foundValidToy := false
+
+	entries := bytes.Split(line, []byte{','})
+	for _, entry := range entries {
+		// Skip empty entries
+		entry = bytes.TrimSpace(entry)
+		if len(entry) == 0 {
+			continue
 		}
-		if toyCount > toyMax {
-			toyMax = toyCount
-			maxToy = toy
+
+		// Remove trailing newline if present
+		if entry[len(entry)-1] == '\n' {
+			entry = entry[:len(entry)-1]
+		}
+
+		// Find the 'x' separator
+		xIndex := bytes.IndexByte(entry, 'x')
+		if xIndex <= 0 || xIndex == len(entry)-1 {
+			continue // Skip invalid format
+		}
+
+		// Parse count
+		count, err := parseCount(entry[:xIndex])
+		if err != nil {
+			continue // Skip invalid count
+		}
+
+		// Update maximum if needed
+		if !foundValidToy || count > maxCount {
+			maxCount = count
+			bestToy = entry
+			foundValidToy = true
 		}
 	}
-	// We may need to trim the toy
-	maxToy = strings.TrimRight(maxToy, "\n")
-	return maxToy, nil
+
+	if !foundValidToy {
+		return nil, errors.New("no valid toy entries found")
+	}
+
+	return bestToy, nil
 }
 
-func GetToyCount(toyDesc string) (int, error) {
-	xIndex := strings.Index(toyDesc, "x")
-	if xIndex == -1 {
-		return 0, fmt.Errorf("invalid toy description: %s", toyDesc)
+func parseCount(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, errors.New("invalid toy entry format")
 	}
-	toyCount, err := strconv.Atoi(toyDesc[:xIndex])
-	if err != nil {
-		return 0, fmt.Errorf("invalid toy count: %s", toyDesc[:xIndex])
+
+	count := 0
+	// Simple overflow prevention
+	const maxSafeInt = (1<<31 - 1) / 10
+
+	for _, b := range data {
+		if b < '0' || b > '9' {
+			return 0, errors.New("invalid toy entry format")
+		}
+
+		// Check for potential overflow
+		if count > maxSafeInt {
+			return 0, errors.New("count too large")
+		}
+
+		count = count*10 + int(b-'0')
 	}
-	return toyCount, nil
+
+	return count, nil
 }
