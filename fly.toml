@@ -22,9 +22,9 @@ primary_region = 'syd'
   processes = ['app']
 
 [[vm]]
-  memory = '4gb'
+  memory = '2gb'
   cpu_kind = 'shared'
-  cpus = 8
+  cpus = 2
 
 # For the profiler
 [[services]]
