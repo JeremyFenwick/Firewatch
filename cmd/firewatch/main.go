@@ -7,6 +7,7 @@ import (
 
 	"github.com/JeremyFenwick/firewatch/internal/budgetchat"
 	"github.com/JeremyFenwick/firewatch/internal/insecuresocketslayer"
+	"github.com/JeremyFenwick/firewatch/internal/jobcenter"
 	"github.com/JeremyFenwick/firewatch/internal/linereversal"
 	"github.com/JeremyFenwick/firewatch/internal/meanstoanend"
 	"github.com/JeremyFenwick/firewatch/internal/mobinthemiddle"
@@ -29,5 +30,6 @@ func main() {
 	go speeddaemon.Listen(5006)
 	go linereversal.Listen(5007)
 	go insecuresocketslayer.Listen(5008)
+	go jobcenter.Listen(5009)
 	select {}
 }

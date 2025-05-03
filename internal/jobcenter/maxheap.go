@@ -9,8 +9,8 @@ import (
 type MaxHeap[T any, I any] struct {
 	mutex       sync.RWMutex
 	data        []T
-	GreaterThan func(a, b T) bool   // Comparator function (a > b)
-	Identify    func(a I, b T) bool // Function to identify the element
+	greaterThan func(a, b T) bool   // Comparator function (a > b)
+	identify    func(a I, b T) bool // Function to identify the element
 }
 
 // API
@@ -32,7 +32,7 @@ func NewMaxHeap[T any, I any](greaterThan func(a, b T) bool, Identify func(a I, 
 	} else {
 		capSize = 10
 	}
-	return &MaxHeap[T, I]{data: make([]T, 0, capSize), GreaterThan: greaterThan, Identify: Identify}
+	return &MaxHeap[T, I]{data: make([]T, 0, capSize), greaterThan: greaterThan, identify: Identify}
 }
 
 // Heapify creates a new MaxHeap from the provided data slice.
@@ -91,7 +91,8 @@ func (mh *MaxHeap[T, I]) Push(item T) {
 	defer mh.mutex.Unlock()
 
 	mh.data = append(mh.data, item)
-	mh.siftUp(mh.Size() - 1)
+	size := len(mh.data)
+	mh.siftUp(size - 1)
 }
 
 // Pop removes and returns the maximum element from the heap, maintaining the heap property.
@@ -99,11 +100,11 @@ func (mh *MaxHeap[T, I]) Pop() (T, bool) {
 	mh.mutex.Lock()
 	defer mh.mutex.Unlock()
 
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		var none T
 		return none, false
 	}
-	lastIndex := mh.Size() - 1
+	lastIndex := len(mh.data) - 1
 	mh.swap(0, lastIndex)
 	item := mh.data[lastIndex]
 	mh.data = mh.data[:lastIndex]
@@ -127,14 +128,14 @@ func (mh *MaxHeap[T, I]) Delete(value I) bool {
 	mh.mutex.Lock()
 	defer mh.mutex.Unlock()
 
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		return false
 	}
 
 	// Find the index first. Use a variable outside the loop scope.
 	foundIndex := -1
 	for i, item := range mh.data {
-		if mh.Identify(value, item) {
+		if mh.identify(value, item) {
 			foundIndex = i
 			break // Exit loop once found
 		}
@@ -162,7 +163,7 @@ func (mh *MaxHeap[T, I]) Delete(value I) bool {
 		// Now, heapify the element that moved into foundIndex.
 		// It's safe to access mh.Data[foundIndex] because foundIndex < lastIndex here.
 		parentIndex := (foundIndex - 1) / 2
-		if foundIndex > 0 && mh.GreaterThan(mh.data[foundIndex], mh.data[parentIndex]) {
+		if foundIndex > 0 && mh.greaterThan(mh.data[foundIndex], mh.data[parentIndex]) {
 			// If it's greater than its parent, sift it up.
 			mh.siftUp(foundIndex)
 		} else {
@@ -181,11 +182,11 @@ func (mh *MaxHeap[T, I]) Contains(value I) bool {
 	mh.mutex.RLock()
 	defer mh.mutex.RUnlock()
 
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		return false
 	}
 	for _, item := range mh.data {
-		if mh.Identify(value, item) {
+		if mh.identify(value, item) {
 			return true
 		}
 	}
@@ -200,14 +201,14 @@ func (mh *MaxHeap[T, I]) Update(id I, newValue T) bool {
 	mh.mutex.Lock()
 	defer mh.mutex.Unlock()
 
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		return false
 	}
 
 	// Find the element
 	index := -1
 	for i, item := range mh.data {
-		if mh.Identify(id, item) {
+		if mh.identify(id, item) {
 			index = i
 			break
 		}
@@ -226,7 +227,7 @@ func (mh *MaxHeap[T, I]) Update(id I, newValue T) bool {
 	// Restore heap property
 	if index > 0 {
 		parentIndex := (index - 1) / 2
-		if mh.GreaterThan(mh.data[index], mh.data[parentIndex]) {
+		if mh.greaterThan(mh.data[index], mh.data[parentIndex]) {
 			// If the new value is greater than its parent, sift up
 			mh.siftUp(index)
 			return true
@@ -235,7 +236,7 @@ func (mh *MaxHeap[T, I]) Update(id I, newValue T) bool {
 
 	// If we didn't sift up, we might need to sift down
 	// Only sift down if the new value is less than the old value
-	if mh.GreaterThan(oldValue, newValue) {
+	if mh.greaterThan(oldValue, newValue) {
 		mh.siftDown(index)
 	}
 
@@ -249,7 +250,7 @@ func (mh *MaxHeap[T, I]) Compact() {
 	mh.mutex.Lock()
 	defer mh.mutex.Unlock()
 
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		mh.data = make([]T, 0) // Reset to empty slice with minimal capacity
 		return
 	}
@@ -266,9 +267,6 @@ func (mh *MaxHeap[T, I]) Compact() {
 //
 // Note that this has O(n) time complexity due to the need to find the element first.
 func (mh *MaxHeap[T, I]) UpdateOrPush(id I, value T) bool {
-	mh.mutex.Lock()
-	defer mh.mutex.Unlock()
-
 	if mh.Update(id, value) {
 		return true // Updated existing element
 	}
@@ -281,28 +279,30 @@ func (mh *MaxHeap[T, I]) UpdateOrPush(id I, value T) bool {
 // INTERNAL OPERATIONS
 
 func (mh *MaxHeap[T, I]) lastIndex() int {
-	if mh.IsEmpty() {
+	if len(mh.data) == 0 {
 		return -1
 	}
-	return mh.Size() - 1
+	return len(mh.data) - 1
 }
 
 func (mh *MaxHeap[T, I]) swap(i, j int) {
-	if i < 0 || i >= mh.Size() || j < 0 || j >= mh.Size() {
-		log.Printf("Swap indices %d and %d out of bounds for heap of size %d", i, j, mh.Size())
+	size := len(mh.data)
+	if i < 0 || i >= size || j < 0 || j >= size {
+		log.Printf("Swap indices %d and %d out of bounds for heap of size %d", i, j, size)
 		return
 	}
 	mh.data[i], mh.data[j] = mh.data[j], mh.data[i]
 }
 
 func (mh *MaxHeap[T, I]) siftUp(index int) {
-	if index < 0 || index >= mh.Size() {
-		log.Printf("Index %d out of bounds for heap of size %d", index, mh.Size())
+	size := len(mh.data)
+	if index < 0 || index >= size {
+		log.Printf("Index %d out of bounds for heap of size %d", index, size)
 		return
 	}
 	for index > 0 {
 		parentIndex := (index - 1) / 2
-		if mh.GreaterThan(mh.data[parentIndex], mh.data[index]) {
+		if mh.greaterThan(mh.data[parentIndex], mh.data[index]) {
 			break
 		}
 		mh.swap(index, parentIndex)
@@ -325,10 +325,10 @@ func (mh *MaxHeap[T, I]) siftDown(index int) {
 		rightChildIndex := 2*index + 2
 		largestIndex := index
 
-		if leftChildIndex <= lastIndex && mh.GreaterThan(mh.data[leftChildIndex], mh.data[largestIndex]) {
+		if leftChildIndex <= lastIndex && mh.greaterThan(mh.data[leftChildIndex], mh.data[largestIndex]) {
 			largestIndex = leftChildIndex
 		}
-		if rightChildIndex <= lastIndex && mh.GreaterThan(mh.data[rightChildIndex], mh.data[largestIndex]) {
+		if rightChildIndex <= lastIndex && mh.greaterThan(mh.data[rightChildIndex], mh.data[largestIndex]) {
 			largestIndex = rightChildIndex
 		}
 		if largestIndex == index {
