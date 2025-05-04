@@ -102,3 +102,11 @@ primary_region = 'syd'
 
   [[services.ports]]
   port = 5008
+
+# Job center
+[[services]]
+  internal_port = 5009
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5009

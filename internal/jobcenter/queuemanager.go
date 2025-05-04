@@ -6,7 +6,7 @@ import (
 )
 
 type QueueManager struct {
-	Mutex        sync.Mutex
+	Mutex        sync.RWMutex
 	Queues       map[string]*MaxHeap[*Job, int] // Maps queue name to MaxHeap
 	JobLocations map[int]string                 // Maps job id to queue name
 	CurrentId    int
@@ -27,15 +27,23 @@ func (qm *QueueManager) GetNextId() int {
 	return qm.CurrentId
 }
 
-func (qm *QueueManager) QueueExists(queueName string) bool {
-	_, exists := qm.Queues[queueName]
+func (qm *QueueManager) JobExists(jobId int) bool {
+	qm.Mutex.RLock()
+	defer qm.Mutex.RUnlock()
+
+	_, exists := qm.JobLocations[jobId]
 	return exists
 }
 
 // PutJob adds a job to the specified queue.
 // If the queue does not exist, it creates a new one.
 func (qm *QueueManager) PutJob(queueName string, job *Job) {
-	if !qm.QueueExists(queueName) {
+	qm.Mutex.Lock()
+	defer qm.Mutex.Unlock()
+
+	_, exists := qm.Queues[queueName]
+
+	if !exists {
 		qm.Queues[queueName] = NewMaxHeap(
 			func(a, b *Job) bool { return a.Priority > b.Priority },
 			func(id int, job *Job) bool { return id == job.Id },
@@ -48,12 +56,16 @@ func (qm *QueueManager) PutJob(queueName string, job *Job) {
 // GetPriorityJob retrieves the job with the highest priority from the specified queues.
 // If multiple queues are specified, it returns the job with the highest priority across all specified queues.
 func (qm *QueueManager) GetPriorityJob(queues ...string) (*Job, bool) {
+	qm.Mutex.Lock()
+	defer qm.Mutex.Unlock()
+
 	if len(queues) == 0 {
 		return nil, false
 	}
 	var candidate *Job
 	for _, queue := range queues {
-		if !qm.QueueExists(queue) {
+		_, exists := qm.Queues[queue]
+		if !exists {
 			continue
 		}
 		job, found := qm.Queues[queue].Peek()
@@ -76,6 +88,9 @@ func (qm *QueueManager) GetPriorityJob(queues ...string) (*Job, bool) {
 // GetJob retrieves a job from the specified queue.
 // Returns whether the job was found and deleted successfully.
 func (qm *QueueManager) DeleteJob(jobId int) bool {
+	qm.Mutex.Lock()
+	defer qm.Mutex.Unlock()
+
 	queueName, exists := qm.JobLocations[jobId]
 	if !exists {
 		return false
@@ -86,5 +101,8 @@ func (qm *QueueManager) DeleteJob(jobId int) bool {
 		return false
 	}
 	delete(qm.JobLocations, jobId)
+	if qm.Queues[queueName].Size() == 0 {
+		delete(qm.Queues, queueName)
+	}
 	return true
 }

@@ -155,3 +155,8 @@ type AbortRequest struct {
 type AbortResponse struct {
 	Status string `json:"status"`
 }
+
+type ErrorResponse struct {
+	Status string `json:"status"`
+	Error  string `json:"error"`
+}

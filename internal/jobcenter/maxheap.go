@@ -108,7 +108,10 @@ func (mh *MaxHeap[T, I]) Pop() (T, bool) {
 	mh.swap(0, lastIndex)
 	item := mh.data[lastIndex]
 	mh.data = mh.data[:lastIndex]
-	mh.siftDown(0)
+
+	if len(mh.data) > 0 {
+		mh.siftDown(0)
+	}
 	return item, true
 }
 

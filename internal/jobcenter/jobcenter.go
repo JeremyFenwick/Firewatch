@@ -95,8 +95,9 @@ func handleConnection(conn net.Conn, queueManager *QueueManager) {
 		}
 		request := parseJsonLine([]byte(clientData))
 		if request.Error != nil {
-			log.Printf("Error parsing request: %v", request.Error)
-			return
+			err := fmt.Errorf("error parsing request: %v", request.Error)
+			handleError(client, err)
+			continue
 		}
 		err = messageDispatch(client, request, queueManager)
 		if err != nil {
@@ -122,22 +123,43 @@ func messageDispatch(client *Client, request Request, queueManager *QueueManager
 	case Abort:
 		handleAbort(client, request.Abort, queueManager)
 	default:
-		return fmt.Errorf("unknown request type: %d", request.Type)
+		unknownRequest := fmt.Errorf("unknown request type: %d", request.Type)
+		handleError(client, unknownRequest)
 	}
 	return nil
+}
+
+func handleError(client *Client, err error) {
+	response := ErrorResponse{
+		Status: "error",
+		Error:  err.Error(),
+	}
+	responseData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshaling error response: %v", err)
+		return
+	}
+	client.Conn.Write(append(responseData, '\n'))
 }
 
 func handleAbort(client *Client, request *AbortRequest, queueManager *QueueManager) {
 	log.Printf("Handling ABORT request for client: %s", client.Conn.RemoteAddr())
 	abortResponse := AbortResponse{}
-	job, exists := client.hasJob(request.Id)
-	if exists {
+	job, jobFound := client.hasJob(request.Id)
+	jobExists := queueManager.JobExists(request.Id)
+	if jobFound {
 		abortResponse.Status = "ok"
 		queueManager.PutJob(job.Queue, job)
 		client.deleteJob(job.Id)
+	} else if jobExists {
+		// If the job exists in the queue manager but not in the client's jobs
+		// we need to send back an error response instead
+		handleError(client, fmt.Errorf("job %d is not controlled by the client", request.Id))
+		return
 	} else {
 		abortResponse.Status = "no-job"
 	}
+
 	responseData, err := json.Marshal(abortResponse)
 	if err != nil {
 		log.Printf("Error marshaling ABORT response: %v", err)
