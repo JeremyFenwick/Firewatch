@@ -48,10 +48,10 @@ func (qm *QueueManager) PutJob(queueName string, job *Job) {
 // GetPriorityJob retrieves the job with the highest priority from the specified queues.
 // If multiple queues are specified, it returns the job with the highest priority across all specified queues.
 func (qm *QueueManager) GetPriorityJob(queues ...string) (*Job, bool) {
-	var candidate *Job
 	if len(queues) == 0 {
 		return nil, false
 	}
+	var candidate *Job
 	for _, queue := range queues {
 		if !qm.QueueExists(queue) {
 			continue
@@ -60,19 +60,16 @@ func (qm *QueueManager) GetPriorityJob(queues ...string) (*Job, bool) {
 		if !found {
 			continue
 		}
-		if candidate == nil {
+		if candidate == nil || job.Priority > candidate.Priority {
 			candidate = job
 			continue
-		}
-		if job.Priority > candidate.Priority {
-			newCandidate, _ := qm.Queues[queue].Pop()
-			candidate = newCandidate
 		}
 	}
 	if candidate == nil {
 		return nil, false
 	}
 	delete(qm.JobLocations, candidate.Id)
+	qm.Queues[candidate.Queue].Pop()
 	return candidate, true
 }
 

@@ -112,8 +112,8 @@ type PutRequest struct {
 }
 
 type PutResponse struct {
-	Request string `json:"request"`
-	Id      int    `json:"id"`
+	Status string `json:"status"`
+	Id     int    `json:"id"`
 }
 
 // GetRequest represents the JSON structure
