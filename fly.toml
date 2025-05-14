@@ -12,6 +12,7 @@ primary_region = 'syd'
 
 [env]
   PORT = '8080'
+  DATA_DIR = "/data"
 
 [http_service]
   internal_port = 8080
@@ -25,6 +26,10 @@ primary_region = 'syd'
   memory = '2gb'
   cpu_kind = 'shared'
   cpus = 2
+
+[mounts]
+  source = "firewatch_fs"
+  destination = "/data"
 
 # For the profiler
 [[services]]
