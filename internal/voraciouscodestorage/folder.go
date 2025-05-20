@@ -67,6 +67,10 @@ func TrackExistingFolder(fullPath string) (*Folder, error) {
 	return folder, nil
 }
 
+func (f *Folder) IsEmpty() bool {
+	return len(f.Files) == 0 && len(f.Children) == 0
+}
+
 func (f *Folder) GetChildAllFiles() []*File {
 	files := make([]*File, 0)
 	for _, file := range f.Files {

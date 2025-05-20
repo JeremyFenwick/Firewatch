@@ -3,13 +3,16 @@ package voraciouscodestorage
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type FileSystem struct {
-	Root *Folder
+	Mutex sync.RWMutex
+	Root  *Folder
 }
 
 func NewFileSystem(rootPath string) (*FileSystem, error) {
@@ -35,7 +38,10 @@ func NewFileSystem(rootPath string) (*FileSystem, error) {
 	}, nil
 }
 
-func (fs *FileSystem) FilesInDirectory(dir string) ([]*File, error) {
+func (fs *FileSystem) GetFolder(dir string) (*Folder, error) {
+	fs.Mutex.RLock()
+	defer fs.Mutex.RUnlock()
+
 	folderNames := folderNames(dir)
 	// Navigate to the target folder
 	currentFolder := fs.Root
@@ -49,22 +55,13 @@ func (fs *FileSystem) FilesInDirectory(dir string) ([]*File, error) {
 		}
 	}
 	// Get all files in the queue
-	files := make([]*File, 0)
-	queue := make([]*Folder, 0)
-	queue = append(queue, currentFolder)
-	for len(queue) > 0 {
-		// Pop the first folder from the queue
-		folder := queue[0]
-		queue = queue[1:]
-		// Add the files in the current folder to the list
-		files = append(files, folder.GetChildAllFiles()...)
-		// Add the child folders to the queue
-		queue = append(queue, folder.GetChildAllFolders()...)
-	}
-	return files, nil
+	return currentFolder, nil
 }
 
 func (fs *FileSystem) AddFile(r io.Reader, fullPath string) (*File, error) {
+	fs.Mutex.Lock()
+	defer fs.Mutex.Unlock()
+
 	dir, fileName := splitDirAndFile(fullPath)
 	// Check if the file name is empty
 	if fileName == "" {
@@ -95,6 +92,9 @@ func (fs *FileSystem) AddFile(r io.Reader, fullPath string) (*File, error) {
 }
 
 func (fs *FileSystem) ReadLatestFile(fullpath string, w io.Writer) error {
+	fs.Mutex.RLock()
+	defer fs.Mutex.RUnlock()
+
 	dir, fileName := splitDirAndFile(fullpath)
 	// Check if the file name is empty
 	if fileName == "" {
@@ -119,6 +119,9 @@ func (fs *FileSystem) ReadLatestFile(fullpath string, w io.Writer) error {
 }
 
 func (fs *FileSystem) ReadFile(fullPath string, version int, w io.Writer) error {
+	fs.Mutex.RLock()
+	defer fs.Mutex.RUnlock()
+
 	dir, fileName := splitDirAndFile(fullPath)
 	// Check if the file name is empty
 	if fileName == "" {
@@ -140,6 +143,28 @@ func (fs *FileSystem) ReadFile(fullPath string, version int, w io.Writer) error 
 		return fmt.Errorf("error reading file %s: %v", fullPath, err)
 	}
 	return nil
+}
+
+func (fs *FileSystem) Clear() {
+	fs.Mutex.Lock()
+	defer fs.Mutex.Unlock()
+
+	entries, err := os.ReadDir(fs.Root.FullPath)
+	if err != nil {
+		log.Printf("Error reading directory %s: %v", fs.Root.FullPath, err)
+		return
+	}
+
+	for _, entry := range entries {
+		entryPath := filepath.Join(fs.Root.FullPath, entry.Name())
+		err := os.RemoveAll(entryPath)
+		if err != nil {
+			log.Printf("Error removing entry %s: %v", entryPath, err)
+			return
+		}
+	}
+	fs.Root.Files = make(map[string]*File)
+	fs.Root.Children = make(map[string]*Folder)
 }
 
 func (fs *FileSystem) createFolders(fullPath string) (*Folder, error) {

@@ -19,20 +19,22 @@ func TestFilesInDirectoryFromRoot(t *testing.T) {
 	fs, err := voraciouscodestorage.NewFileSystem("./data")
 	assert.NoError(t, err, "should not return an error when generating the file system")
 	assert.NotNil(t, fs, "FileSystem should not be nil")
-	files, err := fs.FilesInDirectory("/")
+	folder, err := fs.GetFolder("/")
 	assert.NoError(t, err, "should not return an error when getting files in directory")
-	assert.Len(t, files, 2, "should find 2 files in the directory")
-	assert.Equal(t, "text.txt", files[0].Name, "first file should be text.txt")
-	assert.Equal(t, "inner_text.txt", files[1].Name, "second file should be inner_text.txt")
+	files := folder.GetChildAllFiles()
+	assert.NoError(t, err, "should not return an error when getting files in directory")
+	assert.Len(t, files, 0, "should find 2 files in the directory")
 }
 
 func TestFilesInDirectoryFromSubFolder(t *testing.T) {
 	fs, err := voraciouscodestorage.NewFileSystem("./data")
 	assert.NoError(t, err, "should not return an error when generating the file system")
 	assert.NotNil(t, fs, "FileSystem should not be nil")
-	files, err := fs.FilesInDirectory("/subfolder/innerfolder")
+	folder, err := fs.GetFolder("/subfolder/innerfolder")
 	assert.NoError(t, err, "should not return an error when getting files in directory")
-	assert.Len(t, files, 1, "should find 2 files in the directory")
+	files := folder.GetChildAllFiles()
+	assert.NoError(t, err, "should not return an error when getting files in directory")
+	assert.Len(t, files, 1, "should find 1 file in the directory")
 	assert.Equal(t, "inner_text.txt", files[0].Name, "first file should be inner_text.txt")
 }
 

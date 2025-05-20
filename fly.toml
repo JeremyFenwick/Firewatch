@@ -115,3 +115,11 @@ primary_region = 'syd'
 
   [[services.ports]]
   port = 5009
+
+# VCS
+[[services]]
+  internal_port = 5010
+  protocol = "tcp"
+
+  [[services.ports]]
+  port = 5010
