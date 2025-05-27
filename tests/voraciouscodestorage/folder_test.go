@@ -1,46 +1,74 @@
 package voraciouscodestorage_test
 
 import (
-	"bytes"
-	"path/filepath"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/JeremyFenwick/firewatch/internal/voraciouscodestorage"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTrackExistingFolder(t *testing.T) {
-	path, _ := filepath.Abs("./data/subfolder")
-	folder, err := voraciouscodestorage.TrackExistingFolder(path)
-	assert.NoError(t, err, "should not return an error when tracking an existing folder")
-	assert.True(t, folder.HasChildFile("new_text.txt"))
-	assert.True(t, folder.HasChildFile("text.txt"))
-	assert.True(t, folder.HasChildFolder("innerfolder"))
+func TestCreateFolder(t *testing.T) {
+	// This test will create a folder and check if it exists.
+	// It will also clean up by deleting the folder after the test.
+	dir, err := os.Getwd()
+	assert.NoError(t, err)
+
+	folderPath := dir + "/test_folder"
+	newFolder, err := voraciouscodestorage.NewFolder(folderPath)
+	assert.NoError(t, err)
+	// Check if the folder was created
+	_, err = os.Stat(folderPath)
+	assert.NoError(t, err)
+	// Clean up by deleting the folder
+	err = newFolder.Delete()
+	assert.NoError(t, err)
 }
 
-func TestCreateNewFolder(t *testing.T) {
-	path, _ := filepath.Abs("./data/subfolder/testfolder")
-	folder, err := voraciouscodestorage.CreateNewFolder(path)
-	assert.NoError(t, err, "should not return an error when creating a new folder")
-	assert.Equal(t, "testfolder", folder.Name)
-	assert.Equal(t, path, folder.FullPath)
-	assert.Empty(t, folder.Files)
-	assert.Empty(t, folder.Children)
+func TestCreateSubfolder(t *testing.T) {
+	// This test will create a subfolder within an existing folder.
+	dir, err := os.Getwd()
+	assert.NoError(t, err)
 
-	// Clean up
-	err = folder.Remove()
-	assert.NoError(t, err, "should not return an error when removing the folder")
+	folderPath := dir + "/test_folder"
+	newFolder, err := voraciouscodestorage.NewFolder(folderPath)
+	assert.NoError(t, err)
+
+	subFolderName := "sub_folder"
+	_, err = newFolder.AddNewSubFolder(subFolderName)
+	assert.NoError(t, err)
+
+	// Check if the subfolder was created
+	_, err = os.Stat(folderPath + "/" + subFolderName)
+	assert.NoError(t, err)
+
+	// Clean up by deleting the subfolder and the main folder
+	err = newFolder.Delete()
+	assert.NoError(t, err)
 }
 
-func TestReadFile(t *testing.T) {
-	path, _ := filepath.Abs("./data/subfolder")
-	folder, err := voraciouscodestorage.TrackExistingFolder(path)
-	assert.NoError(t, err, "should not return an error when tracking an existing folder")
-	assert.True(t, folder.HasChildFile("text.txt"))
-	var buffer bytes.Buffer
-	folder.ReadLatestFile("text.txt", &buffer)
-	assert.Equal(t, "singing ranger", buffer.String(), "should read the latest file correctly")
-	buffer.Reset()
-	folder.ReadFile("text.txt", 1, &buffer)
-	assert.Equal(t, "prancing horse", buffer.String(), "should read the older file version correctly")
+func TestCreateFileInFolder(t *testing.T) {
+	// This test will create a file in an existing folder.
+	dir, err := os.Getwd()
+	assert.NoError(t, err)
+
+	folderPath := dir + "/test_folder"
+	newFolder, err := voraciouscodestorage.NewFolder(folderPath)
+	assert.NoError(t, err)
+
+	fileName := "test_file.txt"
+	content := "Hello, World!"
+	reader := strings.NewReader(content)
+
+	_, err = newFolder.AddNewFile(fileName, reader, len(content))
+	assert.NoError(t, err)
+
+	// Check if the first version of the file was created
+	_, err = os.Stat(folderPath + "/" + fileName + ".1")
+	assert.NoError(t, err)
+
+	// Clean up by deleting the folder
+	err = newFolder.Delete()
+	assert.NoError(t, err)
 }

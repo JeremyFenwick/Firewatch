@@ -28,7 +28,8 @@ func Listen(port int) {
 	log.Printf("Server listening on port %d", port)
 	// Create the file system
 	dataDir := getDataDir()
-	fs, err := NewFileSystem(dataDir)
+	log.Println("Data directory:", dataDir)
+	fs, err := NewFileManager(dataDir)
 	if err != nil {
 		log.Fatalf("Error creating file system: %v", err)
 	}
@@ -43,7 +44,7 @@ func Listen(port int) {
 	}
 }
 
-func handleConnection(conn net.Conn, fs *FileSystem) {
+func handleConnection(conn net.Conn, fm *FileManager) {
 	defer conn.Close()
 	// Handle the connection
 	reader := bufio.NewReader(conn)
@@ -60,6 +61,7 @@ func handleConnection(conn net.Conn, fs *FileSystem) {
 			log.Printf("Error reading from connection: %v", err)
 			return
 		}
+		log.Printf("Received command: %s", command)
 		command = command[:len(command)-1] // Remove the newline character
 		commandList := strings.Split(command, " ")
 		// Match the command
@@ -78,7 +80,7 @@ func handleConnection(conn net.Conn, fs *FileSystem) {
 				}
 				continue
 			}
-			err := handleList(conn, fs, commandList)
+			err := handleList(conn, fm, commandList)
 			if err != nil {
 				log.Printf("Error handling list request: %v", err)
 				return
@@ -91,7 +93,7 @@ func handleConnection(conn net.Conn, fs *FileSystem) {
 				}
 				continue
 			}
-			err := handleGet(conn, fs, commandList)
+			err := handleGet(conn, fm, commandList)
 			if err != nil {
 				log.Printf("Error handling get request: %v", err)
 				return
@@ -104,13 +106,13 @@ func handleConnection(conn net.Conn, fs *FileSystem) {
 					return
 				}
 			}
-			err = handlePut(conn, fs, commandList)
+			err = handlePut(conn, fm, commandList)
 			if err != nil {
 				log.Printf("Error handling put request: %v", err)
 				return
 			}
 		case "CLEAR":
-			fs.Clear()
+			fm.Clear()
 			_, err := conn.Write([]byte("OK cleared fs contents\n"))
 			if err != nil {
 				log.Printf("Error writing to connection: %v", err)
@@ -127,7 +129,7 @@ func handleConnection(conn net.Conn, fs *FileSystem) {
 	}
 }
 
-func handlePut(conn net.Conn, fs *FileSystem, commandList []string) error {
+func handlePut(conn net.Conn, fm *FileManager, commandList []string) error {
 	// Check if the file name is valid
 	if !isValidPath(commandList[1]) {
 		_, err := conn.Write([]byte("ERR illegal file name\n"))
@@ -143,16 +145,16 @@ func handlePut(conn net.Conn, fs *FileSystem, commandList []string) error {
 	}
 	// Create the file
 	limitReader := io.LimitReader(conn, int64(readLimit))
-	file, err := fs.AddFile(limitReader, fileName)
 	if err != nil {
 		return fmt.Errorf("error creating file: %v", err)
 	}
+	file, err := fm.AddFile(fileName, limitReader, readLimit)
 	// Write the version number back to the connection
 	_, err = conn.Write([]byte(fmt.Sprintf("OK r%d\n", file.LatestVersion)))
 	return nil
 }
 
-func handleGet(conn net.Conn, fs *FileSystem, commandList []string) error {
+func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
 	// Check if the file name is valid
 	if !isValidPath(commandList[1]) {
 		_, err := conn.Write([]byte("ERR illegal file name\n"))
@@ -164,7 +166,7 @@ func handleGet(conn net.Conn, fs *FileSystem, commandList []string) error {
 	fullPath := commandList[1]
 	folderName, fileName := splitDirFile(fullPath)
 	// Get the target folder
-	targetFolder, err := fs.GetFolder(folderName)
+	targetFolder, err := fm.GetFolder(folderName)
 	if err != nil {
 		_, err := conn.Write([]byte("ERR no such file\n"))
 		if err != nil {
@@ -173,7 +175,7 @@ func handleGet(conn net.Conn, fs *FileSystem, commandList []string) error {
 		return nil
 	}
 	// Check if the file exists
-	if !targetFolder.HasChildFile(fileName) {
+	if _, exists := targetFolder.Files[fileName]; !exists {
 		_, err := conn.Write([]byte("ERR no such file\n"))
 		if err != nil {
 			return fmt.Errorf("error writing to connection: %v", err)
@@ -195,7 +197,7 @@ func handleGet(conn net.Conn, fs *FileSystem, commandList []string) error {
 		revision = parsedRevision
 	}
 	// Read the file
-	targetFolder.ReadFile(fileName, revision, conn)
+	targetFolder.Files[fileName].Files[revision].ReadFile(conn)
 	return nil
 }
 
@@ -208,7 +210,7 @@ func handleHelp(conn net.Conn) error {
 	return nil
 }
 
-func handleList(conn net.Conn, fs *FileSystem, commandList []string) error {
+func handleList(conn net.Conn, fm *FileManager, commandList []string) error {
 	// Check if the directory is valid
 	if !isValidPath(commandList[1]) {
 		_, err := conn.Write([]byte("ERR illegal dir name\n"))
@@ -218,7 +220,7 @@ func handleList(conn net.Conn, fs *FileSystem, commandList []string) error {
 	}
 	targetDir := commandList[1]
 	// Get the target folder
-	targetFolder, err := fs.GetFolder(targetDir)
+	targetFolder, err := fm.GetFolder(targetDir)
 	if err != nil || targetFolder.IsEmpty() {
 		_, err := conn.Write([]byte("OK 0\n"))
 		if err != nil {
@@ -227,14 +229,14 @@ func handleList(conn net.Conn, fs *FileSystem, commandList []string) error {
 		return nil
 	}
 	// Send all files in the folder
-	for _, file := range targetFolder.GetChildAllFiles() {
-		_, err := conn.Write([]byte(file.Name + "\n"))
+	for _, file := range targetFolder.GetFiles() {
+		_, err := conn.Write([]byte(file.FileName + "\n"))
 		if err != nil {
 			return err
 		}
 	}
 	// Send all folders in the folder
-	for _, folder := range targetFolder.GetChildAllFolders() {
+	for _, folder := range targetFolder.GetSubFolders() {
 		_, err := conn.Write([]byte(folder.Name + "\n"))
 		if err != nil {
 			return err

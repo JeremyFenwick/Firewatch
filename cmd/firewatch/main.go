@@ -15,7 +15,6 @@ import (
 	"github.com/JeremyFenwick/firewatch/internal/smoketest"
 	"github.com/JeremyFenwick/firewatch/internal/speeddaemon"
 	"github.com/JeremyFenwick/firewatch/internal/unusualdatabase"
-	"github.com/JeremyFenwick/firewatch/internal/voraciouscodestorage"
 )
 
 func main() {
@@ -32,6 +31,6 @@ func main() {
 	go linereversal.Listen(5007)
 	go insecuresocketslayer.Listen(5008)
 	go jobcenter.Listen(5009)
-	go voraciouscodestorage.Listen(5010)
+	// go voraciouscodestorage.Listen(5010)
 	select {}
 }
