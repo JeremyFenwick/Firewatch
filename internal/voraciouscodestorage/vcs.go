@@ -149,8 +149,14 @@ func handlePut(conn net.Conn, fm *FileManager, commandList []string) error {
 		return fmt.Errorf("error creating file: %v", err)
 	}
 	file, err := fm.AddFile(fileName, limitReader, readLimit)
+	if err != nil {
+		return fmt.Errorf("error adding file: %v", err)
+	}
 	// Write the version number back to the connection
 	_, err = conn.Write([]byte(fmt.Sprintf("OK r%d\n", file.LatestVersion)))
+	if err != nil {
+		return fmt.Errorf("error writing to connection: %v", err)
+	}
 	return nil
 }
 
@@ -187,7 +193,7 @@ func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
 	if len(commandList) == 3 {
 		// Parse the revision number
 		parsedRevision, err := strconv.Atoi(commandList[2])
-		if err != nil || parsedRevision < 0 || parsedRevision > targetFolder.Files[fileName].LatestVersion {
+		if err != nil || parsedRevision < 1 || parsedRevision > targetFolder.Files[fileName].LatestVersion {
 			_, err = conn.Write([]byte("err no such revision\n"))
 			if err != nil {
 				return fmt.Errorf("error writing to connection: %v", err)
@@ -197,7 +203,12 @@ func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
 		revision = parsedRevision
 	}
 	// Read the file
-	targetFolder.Files[fileName].Files[revision].ReadFile(conn)
+	targetFile := targetFolder.Files[fileName].Files[revision-1]
+	_, err = conn.Write([]byte(fmt.Sprintf("OK %d\n", targetFile.Bytes)))
+	if err != nil {
+		return fmt.Errorf("error writing to connection: %v", err)
+	}
+	targetFolder.Files[fileName].Files[revision-1].ReadFile(conn)
 	return nil
 }
 
