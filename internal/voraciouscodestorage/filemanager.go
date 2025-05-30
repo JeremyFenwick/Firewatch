@@ -62,6 +62,9 @@ func (fm *FileManager) AddFile(fullPath string, r io.Reader, bytes int) (*Versio
 	for _, folderName := range folders {
 		subFolder, exists := currentFolder.SubFolders[folderName]
 		if !exists {
+			if folderName == "" {
+				continue // Skip empty folder names (e.g., leading slashes)
+			}
 			// Create the folder if it does not exist
 			subFolder, err := NewFolder(filepath.Join(currentFolder.AbsolutePath, folderName))
 			if err != nil {

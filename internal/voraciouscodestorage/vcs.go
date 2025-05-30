@@ -105,6 +105,7 @@ func handleConnection(conn net.Conn, fm *FileManager) {
 					log.Printf("Error writing to connection: %v", err)
 					return
 				}
+				continue
 			}
 			err = handlePut(conn, fm, commandList)
 			if err != nil {
@@ -170,9 +171,9 @@ func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
 		}
 	}
 	fullPath := commandList[1]
-	folderName, fileName := splitDirFile(fullPath)
+	dir, fileName := splitDirFile(fullPath)
 	// Get the target folder
-	targetFolder, err := fm.GetFolder(folderName)
+	targetFolder, err := fm.GetFolder(dir)
 	if err != nil {
 		_, err := conn.Write([]byte("ERR no such file\n"))
 		if err != nil {
@@ -208,7 +209,10 @@ func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
 	if err != nil {
 		return fmt.Errorf("error writing to connection: %v", err)
 	}
-	targetFolder.Files[fileName].Files[revision-1].ReadFile(conn)
+	err = targetFolder.Files[fileName].Files[revision-1].ReadFile(conn)
+	if err != nil {
+		return fmt.Errorf("error reading file: %v", err)
+	}
 	return nil
 }
 
