@@ -1,6 +1,7 @@
 package voraciouscodestorage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,21 @@ type File struct {
 	AbsolutePath string
 }
 
-func NewFile(r io.Reader, absPath, ext string, bytes int) (*File, error) {
+var (
+	ErrNonTextData = errors.New("non-text data provided")
+)
+
+func NewTextFile(r io.Reader, absPath, ext string, numBytes int) (*File, error) {
+	// Data validation function
+	validText := func(data []byte) bool {
+		for _, b := range data {
+			if (b < 32 || b > 126) && b != '\n' && b != '\r' && b != '\t' {
+				return false
+			}
+		}
+		return true
+	}
+	// Function to check if text is valid
 	path := filepath.Dir(absPath)
 	fileName := filepath.Base(absPath)
 	// Return an error if the path does not exist
@@ -28,15 +43,34 @@ func NewFile(r io.Reader, absPath, ext string, bytes int) (*File, error) {
 	}
 	defer file.Close()
 	// Write the file contents
-	_, err = io.Copy(file, r)
-	if err != nil {
-		return nil, fmt.Errorf("error writing file contents: %v", err)
+	buff := make([]byte, 4096)
+	for {
+		n, err := r.Read(buff)
+		if n > 0 {
+			// Check if the bytes read are valid UTF-8 and do not contain null bytes
+			if !validText(buff[:n]) {
+				// Delete the file
+				file.Close()       // Close the file before deleting
+				os.Remove(absPath) // Remove the file if it contains non-text data
+				return nil, ErrNonTextData
+			}
+			// Write the valid bytes to the file
+			if _, err := file.Write(buff[:n]); err != nil {
+				return nil, fmt.Errorf("error writing to file: %v", err)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error reading from reader: %v", err)
+		}
 	}
 	// Return the file object
 	return &File{
 		Name:         fileName,
 		Ext:          ext,
-		Bytes:        bytes,
+		Bytes:        numBytes,
 		AbsolutePath: absPath,
 	}, nil
 }

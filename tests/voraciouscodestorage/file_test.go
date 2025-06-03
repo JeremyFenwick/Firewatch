@@ -14,7 +14,7 @@ func TestReadFile(t *testing.T) {
 	dir, err := os.Getwd()
 	assert.NoError(t, err)
 	reader := strings.NewReader("swimming swan")
-	newFile, err := voraciouscodestorage.NewFile(reader, dir+"/test.txt", ".txt", 0)
+	newFile, err := voraciouscodestorage.NewTextFile(reader, dir+"/test.txt", ".txt", 0)
 	assert.NoError(t, err)
 	var buff bytes.Buffer
 	newFile.ReadFile(&buff)

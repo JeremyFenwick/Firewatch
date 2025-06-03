@@ -55,9 +55,11 @@ func (fm *FileManager) GetFolder(path string) (*Folder, error) {
 }
 
 func (fm *FileManager) AddFile(fullPath string, r io.Reader, bytes int) (*VersionedFile, error) {
+	// Validate the full path
 	pathSplit := strings.Split(fullPath, string(os.PathSeparator))
 	fileName := pathSplit[len(pathSplit)-1]
 	folders := pathSplit[:len(pathSplit)-1]
+	// Navigate to the correct folder
 	currentFolder := fm.Root
 	for _, folderName := range folders {
 		subFolder, exists := currentFolder.SubFolders[folderName]
@@ -84,11 +86,13 @@ func (fm *FileManager) AddFile(fullPath string, r io.Reader, bytes int) (*Versio
 			return nil, err
 		}
 		return currentFolder.Files[fileName], nil
-	} else {
-		// Create the file in the current folder
-		currentFolder.AddNewFile(fileName, r, bytes)
-		return currentFolder.Files[fileName], nil
 	}
+	// Create the file in the current folder
+	_, err := currentFolder.AddNewFile(fileName, r, bytes)
+	if err != nil {
+		return nil, err
+	}
+	return currentFolder.Files[fileName], nil
 }
 
 func (fm *FileManager) Clear() {

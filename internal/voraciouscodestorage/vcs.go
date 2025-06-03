@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -46,15 +47,14 @@ func Listen(port int) {
 
 func handleConnection(conn net.Conn, fm *FileManager) {
 	defer conn.Close()
+	// Send the ready message
+	err := sendMessage(conn, "READY", false)
+	if err != nil {
+		return
+	}
 	// Handle the connection
 	reader := bufio.NewReader(conn)
 	for {
-		// Send the ready message
-		_, err := conn.Write([]byte("READY\n"))
-		if err != nil {
-			log.Printf("Error writing to connection: %v", err)
-			return
-		}
 		// Read the command from the connection
 		command, err := reader.ReadString('\n')
 		if err != nil {
@@ -74,9 +74,9 @@ func handleConnection(conn net.Conn, fm *FileManager) {
 			}
 		case "LIST":
 			if len(commandList) < 2 {
-				_, err := conn.Write([]byte("ERR usage: LIST dir\n"))
+				err := sendMessage(conn, "ERR usage: LIST dir", true)
 				if err != nil {
-					log.Printf("Error writing to connection: %v", err)
+					return
 				}
 				continue
 			}
@@ -86,178 +86,157 @@ func handleConnection(conn net.Conn, fm *FileManager) {
 				return
 			}
 		case "GET":
-			if len(commandList) < 2 {
-				_, err := conn.Write([]byte("ERR usage: GET file [revision]\n"))
-				if err != nil {
-					log.Printf("Error writing to connection: %v", err)
-				}
-				continue
-			}
 			err := handleGet(conn, fm, commandList)
 			if err != nil {
 				log.Printf("Error handling get request: %v", err)
 				return
 			}
 		case "PUT":
-			if len(commandList) < 3 {
-				_, err := conn.Write([]byte("ERR usage: PUT file length newline data\n"))
-				if err != nil {
-					log.Printf("Error writing to connection: %v", err)
-					return
-				}
-				continue
-			}
-			err = handlePut(conn, fm, commandList)
+			err = handlePut(reader, conn, fm, commandList)
 			if err != nil {
 				log.Printf("Error handling put request: %v", err)
 				return
 			}
 		case "CLEAR":
 			fm.Clear()
-			_, err := conn.Write([]byte("OK cleared fs contents\n"))
+			err := sendMessage(conn, "OK cleared fs contents", true)
 			if err != nil {
-				log.Printf("Error writing to connection: %v", err)
 				return
 			}
 		default:
-			_, err := conn.Write([]byte("ERR illegal method: " + commandList[0] + "\n"))
-			if err != nil {
-				log.Printf("Error writing illegal method  to connection: %v", err)
-				return
-			}
+			sendMessage(conn, fmt.Sprintf("ERR illegal method %s", commandList[0]), false)
 			return
 		}
 	}
 }
 
-func handlePut(conn net.Conn, fm *FileManager, commandList []string) error {
+func handlePut(r io.Reader, conn net.Conn, fm *FileManager, commandList []string) error {
+	// Validate the command
+	if len(commandList) != 3 {
+		return sendMessage(conn, "ERR usage: PUT file length newline data", true)
+	}
 	// Check if the file name is valid
 	if !isValidPath(commandList[1]) {
-		_, err := conn.Write([]byte("ERR illegal file name\n"))
+		err := sendMessage(conn, "ERR illegal file name", false)
 		if err != nil {
-			return fmt.Errorf("error writing to connection: %v", err)
+			return err
 		}
+		return nil
 	}
 	fileName := commandList[1]
-	// Get the read limit
-	readLimit, err := strconv.Atoi(commandList[2])
-	if err != nil {
-		readLimit = 0
-	}
+	// Get the read limit. Default to 0 is fine
+	readLimit, _ := strconv.Atoi(commandList[2])
 	// Create the file
-	limitReader := io.LimitReader(conn, int64(readLimit))
-	if err != nil {
-		return fmt.Errorf("error creating file: %v", err)
-	}
+	limitReader := io.LimitReader(r, int64(readLimit))
 	file, err := fm.AddFile(fileName, limitReader, readLimit)
+	if err == ErrNonTextData {
+		return sendMessage(conn, "ERR text files only", true)
+	}
 	if err != nil {
 		return fmt.Errorf("error adding file: %v", err)
 	}
 	// Write the version number back to the connection
-	_, err = conn.Write([]byte(fmt.Sprintf("OK r%d\n", file.LatestVersion)))
-	if err != nil {
-		return fmt.Errorf("error writing to connection: %v", err)
-	}
-	return nil
+	return sendMessage(conn, fmt.Sprintf("OK r%d", file.LatestVersion), true)
 }
 
 func handleGet(conn net.Conn, fm *FileManager, commandList []string) error {
+	sendNoSuchFile := func() error {
+		return sendMessage(conn, "ERR no such file", true)
+	}
+	// Validate the command
+	if len(commandList) < 2 || len(commandList) > 3 {
+		return sendMessage(conn, "ERR usage: GET file [revision]", true)
+	}
 	// Check if the file name is valid
 	if !isValidPath(commandList[1]) {
-		_, err := conn.Write([]byte("ERR illegal file name\n"))
-		if err != nil {
-			return fmt.Errorf("error writing to connection: %v", err)
-
-		}
+		return sendMessage(conn, "ERR illegal file name", false)
 	}
 	fullPath := commandList[1]
 	dir, fileName := splitDirFile(fullPath)
 	// Get the target folder
 	targetFolder, err := fm.GetFolder(dir)
 	if err != nil {
-		_, err := conn.Write([]byte("ERR no such file\n"))
-		if err != nil {
-			return fmt.Errorf("error writing to connection: %v", err)
-		}
-		return nil
+		return sendNoSuchFile()
 	}
-	// Check if the file exists
-	if _, exists := targetFolder.Files[fileName]; !exists {
-		_, err := conn.Write([]byte("ERR no such file\n"))
-		if err != nil {
-			return fmt.Errorf("error writing to connection: %v", err)
-		}
-		return nil
+	// Check if there was a prior error or the file doesn't exist
+	_, exists := targetFolder.Files[fileName]
+	if !exists {
+		return sendNoSuchFile()
 	}
 	// Set the revision if provided
 	revision := targetFolder.Files[fileName].LatestVersion
 	if len(commandList) == 3 {
+		revisionInput := commandList[2]
+		// Check if the revision number starts with 'r'
+		if strings.HasPrefix(commandList[2], "r") {
+			revisionInput = revisionInput[1:] // Remove the 'r' prefix
+		}
 		// Parse the revision number
-		parsedRevision, err := strconv.Atoi(commandList[2])
+		parsedRevision, err := strconv.Atoi(revisionInput)
 		if err != nil || parsedRevision < 1 || parsedRevision > targetFolder.Files[fileName].LatestVersion {
-			_, err = conn.Write([]byte("err no such revision\n"))
-			if err != nil {
-				return fmt.Errorf("error writing to connection: %v", err)
-			}
-			return nil
+			return sendMessage(conn, "ERR no such revision", true)
 		}
 		revision = parsedRevision
 	}
 	// Read the file
 	targetFile := targetFolder.Files[fileName].Files[revision-1]
-	_, err = conn.Write([]byte(fmt.Sprintf("OK %d\n", targetFile.Bytes)))
+	err = sendMessage(conn, fmt.Sprintf("OK %d", targetFile.Bytes), false)
 	if err != nil {
-		return fmt.Errorf("error writing to connection: %v", err)
+		return err
 	}
 	err = targetFolder.Files[fileName].Files[revision-1].ReadFile(conn)
 	if err != nil {
 		return fmt.Errorf("error reading file: %v", err)
 	}
-	return nil
+	return sendMessage(conn, "READY", false)
 }
 
 func handleHelp(conn net.Conn) error {
-	helpMessage := "OK Usage: HELP|GET|PUT|LIST"
-	_, err := conn.Write([]byte(helpMessage + "\n"))
-	if err != nil {
-		return err
-	}
-	return nil
+	return sendMessage(conn, "OK Usage: HELP|GET|PUT|LIST", true)
 }
 
 func handleList(conn net.Conn, fm *FileManager, commandList []string) error {
 	// Check if the directory is valid
 	if !isValidPath(commandList[1]) {
-		_, err := conn.Write([]byte("ERR illegal dir name\n"))
-		if err != nil {
-			return fmt.Errorf("error writing to connection: %v", err)
-		}
+		return sendMessage(conn, "ERR illegal dir name", false)
 	}
 	targetDir := commandList[1]
 	// Get the target folder
 	targetFolder, err := fm.GetFolder(targetDir)
-	if err != nil || targetFolder.IsEmpty() {
-		_, err := conn.Write([]byte("OK 0\n"))
-		if err != nil {
-			return err
-		}
-		return nil
+	if err != nil {
+		return sendMessage(conn, "OK 0", true)
 	}
-	// Send all files in the folder
-	for _, file := range targetFolder.GetFiles() {
-		_, err := conn.Write([]byte(file.FileName + "\n"))
-		if err != nil {
-			return err
-		}
+	itemCount := len(targetFolder.Files) + len(targetFolder.SubFolders)
+	// Send the number of items in the folder
+	err = sendMessage(conn, fmt.Sprintf("OK %d", itemCount), false)
+	if err != nil {
+		return err
 	}
+	// Get the folders and sort them
+	folders := targetFolder.GetSubFolders()
+	sort.Slice(folders, func(i, j int) bool {
+		return folders[i].Name < folders[j].Name
+	})
 	// Send all folders in the folder
-	for _, folder := range targetFolder.GetSubFolders() {
-		_, err := conn.Write([]byte(folder.Name + "\n"))
+	for _, folder := range folders {
+		err := sendMessage(conn, folder.Name+"/ DIR", false)
 		if err != nil {
 			return err
 		}
 	}
-	return nil
+	// Get the files and sort them
+	files := targetFolder.GetFiles()
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].FileName < files[j].FileName
+	})
+	// Send all files in the folder
+	for _, file := range files {
+		err := sendMessage(conn, fmt.Sprintf("%s r%d", file.FileName, file.LatestVersion), false)
+		if err != nil {
+			return err
+		}
+	}
+	return sendMessage(conn, "READY", false)
 }
 
 func getDataDir() string {
@@ -280,13 +259,22 @@ func getDataDir() string {
 }
 
 func isValidPath(p string) bool {
+	isLegal := func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' || r == '/' || r == '\\'
+	}
 	// Must be absolute
 	if !filepath.IsAbs(p) {
 		return false
 	}
 	// Must not contain double slashes (except the leading one, which is part of Unix absolute paths)
-	if strings.Contains(p[1:], "//") {
+	if strings.Contains(p, "//") {
 		return false
+	}
+	// Must not contain illegal characters
+	for _, r := range p {
+		if !isLegal(r) {
+			return false
+		}
 	}
 	// Must not be empty
 	if p == "" {
@@ -298,4 +286,18 @@ func isValidPath(p string) bool {
 func splitDirFile(fullPath string) (string, string) {
 	lastSlash := strings.LastIndex(fullPath, string(os.PathSeparator))
 	return fullPath[:lastSlash+1], fullPath[lastSlash+1:]
+}
+
+func sendMessage(conn net.Conn, message string, readyFollowUp bool) error {
+	// Send a message to the connection
+	log.Printf("Sending message: %s", message)
+	_, err := conn.Write([]byte(message + "\n"))
+	if err != nil {
+		log.Printf("Error writing to connection: %v", err)
+		return fmt.Errorf("error writing to connection: %v", err)
+	}
+	if readyFollowUp {
+		return sendMessage(conn, "READY", false)
+	}
+	return nil
 }
